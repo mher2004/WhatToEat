@@ -1,91 +1,155 @@
 # WhatToEat (Ի՞նչ եփել այսօր) 🍲🛒
 
-A budget-aware daily meal planner and grocery cost optimizer built on live supermarket prices in Yerevan, Armenia (AMD). 
+A budget-aware daily meal planner and grocery cost optimizer built on supermarket prices in Yerevan, Armenia (AMD).
 
-**WhatToEat** scrapes real product catalogs, normalizes noisy Armenian/Russian/English product names into canonical ingredients, computes both proportional *eaten* meal costs and real *checkout* whole-pack grocery bills, and provides an interactive **Armenian Telegram bot** alongside a CLI planner.
+**WhatToEat** scrapes the Yerevan City product catalog, normalizes noisy Armenian/Russian product names into canonical ingredients, computes both the proportional *eaten* cost of a meal and the real *checkout* cost (whole packs), and serves it through an **Armenian CLI planner** and an **Armenian Telegram bot**.
 
 ---
 
 ## ✨ Features
 
-- **Live Supermarket Price Ingestion:** Scrapes Yerevan City product categories with rate-limiting, resume support, and append-only SQLite price history (storing rows only when prices change).
-- **Multilingual Ingredient Matching:** Maps raw supermarket product names (`«brands»`, weights, pack sizes) to canonical ingredients using word-anchored regex rules across Armenian, Russian, and Latin scripts.
-- **Outlier & Size QA:** Filters unreliable package weights and price outliers (`p25` and `median` per-unit pricing in AMD/kg, AMD/L, or AMD/piece).
-- **Eaten Cost vs. Real Checkout Cost:** Distinguishes between the proportional cost of ingredients actually consumed in a recipe and the real supermarket bill rounded up to whole packs (or 100 g steps for loose produce), tracking leftover ingredient value.
-- **Smart Menu Optimization:** Generates varied daily menus (Breakfast, Lunch, Dinner) within a target daily AMD budget while avoiding repetitive staple ingredients.
-- **Armenian Telegram Bot (`bot.py`):** Simple button-driven interface in Armenian for selecting household size, meal combinations, and daily budget—returning menu options, step-by-step Armenian recipes, and itemized shopping lists.
+- **Price ingestion:** scrapes Yerevan City with rate limiting and resume support; the SQLite history stores a new price row only when a price changes. Discounts are used as the real price.
+- **Ingredient matching:** maps product names (`«brands»`, pack sizes) to ~120 canonical ingredients with word-anchored regex rules (Armenian / Russian / Latin).
+- **Size and outlier QA:** untrusted pack sizes and absurd unit prices are dropped (`p25` and `median` price per kg / litre / piece).
+- **Eaten cost vs. real shop bill:** proportional cost of what is eaten, versus the whole-pack bill (loose items in 100 g steps), with leftover value shown.
+- **Menu planner:** best varied menus for breakfast / lunch / dinner within a daily budget, 1 or many days.
+- **Armenian by default:** all CLI and bot texts, ingredient names, recipe names and cooking steps (`--lang en` for English).
+- **Telegram bot:** buttons for people, meals and budget, then 3 menu options, recipes and a shopping list.
+
+> Prices are **not** checked live. Everything uses the last scrape stored in `whattoeat.db`. Run `./update.sh` to refresh (see below).
 
 ---
 
-## 🗂 Project Structure
+## 🗂 Project structure
 
 ```text
 WhatToEat/
-├── scraper.py        # Fetches raw category JSONs from Yerevan City API
-├── check.py          # Read-only sanity checks for scraped weights & unit prices
-├── sizes.py          # Parses product weights/volumes/pieces and unit prices
-├── db.py             # SQLite schema & incremental price loader (whattoeat.db)
-├── ingredients.py    # Canonical ingredient dictionary (EN/HY) & regex matching rules
-├── match.py          # Maps products_raw -> ingredients and computes p25/median prices
-├── recipes_data.py   # Recipe catalog with Armenian titles, ingredients, and steps
-├── recipes.py        # Loads recipes into SQLite
-├── cost.py           # Calculates proportional (eaten) recipe costs
-├── shop.py           # Optimizes whole-pack supermarket shopping lists
-├── plan.py           # CLI meal planner & menu scorer
-└── bot.py            # Interactive Armenian Telegram bot
+├── update.sh         # refresh all data (scrape -> db -> match -> recipes)
+├── run_bot.sh        # start the Telegram bot
+├── scraper.py        # fetches raw category JSON from the Yerevan City API -> raw/
+├── check.py          # read-only sanity checks of the latest raw scrape
+├── sizes.py          # parses pack sizes (g / ml / pcs) and unit prices (python3 sizes.py = tests)
+├── db.py             # SQLite schema + incremental price loader (whattoeat.db)
+├── words.py          # word-frequency report used to build the ingredient dictionary
+├── ingredients.py    # canonical ingredients + regex matching rules
+├── match.py          # products -> ingredients, ingredient price stats (p25 / median)
+├── names_hy.py       # Armenian ingredient names
+├── recipes_data.py   # recipes (English): ingredients, quantities, steps
+├── recipes_hy.py     # recipes (Armenian): names and steps
+├── recipes.py        # loads recipes into the DB
+├── cost.py           # eaten cost of recipes
+├── shop.py           # pack-aware shopping lists
+├── i18n.py           # interface texts (hy / en) and meal-name parsing
+├── plan.py           # CLI planner
+└── bot.py            # Telegram bot
 ```
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Setup (once)
 
-### 1. Prerequisites
-- Python 3.10+
-- SQLite3
+Requirements: Python 3.10+.
 
-Install dependencies:
 ```bash
 pip install httpx "python-telegram-bot>=20.0"
+chmod +x update.sh run_bot.sh
+./update.sh          # builds whattoeat.db (first run takes a few minutes)
 ```
 
-### 2. Scrape & Build the Database
+## 🔄 Updating the data
+
 ```bash
-# 1. Scrape core food categories from Yerevan City
-python3 scraper.py
-
-# 2. Run sanity checks on the raw scrape (optional)
-python3 check.py
-
-# 3. Load products and price deltas into whattoeat.db
-python3 db.py
-
-# 4. Match products to canonical ingredients & compute unit prices
-python3 match.py
-
-# 5. Load recipes into the database
-python3 recipes.py
+./update.sh                 # full update: scrape + db + match + recipes
+./update.sh --skip-scrape   # rebuild from the latest saved scrape, no website access
+./update.sh --check         # also run check.py sanity checks
 ```
 
-### 3. Run the CLI Meal Planner
+It runs, in order: `scraper.py` -> `db.py` -> `match.py` -> `recipes.py`, stops on the first error, and appends output to `logs/update.log`.
+Run it daily to keep prices fresh. Example cron entry (every day at 06:00):
+
+```cron
+0 6 * * * cd /path/to/WhatToEat && ./update.sh >/dev/null 2>&1
+```
+
+Run `./update.sh` again whenever you edit `ingredients.py`, `recipes_data.py`, `recipes_hy.py` or `names_hy.py`
+(use `--skip-scrape` to avoid re-downloading).
+
+## 🤖 Running the Telegram bot
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token.
+2. Give the token to the script, either way:
+   ```bash
+   export BOT_TOKEN="123456:ABC..."
+   ./run_bot.sh
+   ```
+   or create a file `.env` in the project folder with one line `BOT_TOKEN=123456:ABC...` and run `./run_bot.sh`.
+3. Open your bot in Telegram and send `/start`.
+
 ```bash
-# Plan breakfast, lunch, and dinner for 2 people within 2,500 AMD/day
-python3 plan.py --people 2 --meals breakfast,lunch,dinner --budget 2500 --steps
-
-# Enforce that the real whole-pack checkout bill fits the budget
-python3 plan.py --people 4 --meals lunch,dinner --budget 4000 --real
+./run_bot.sh --forever      # restart automatically if it crashes
 ```
 
-### 4. Run the Armenian Telegram Bot
-Create a bot via [@BotFather](https://t.me/BotFather), set your token, and start the bot:
+Keep `.env` private (do not commit it; add it to `.gitignore`). The bot reads `whattoeat.db` on every request, so after `./update.sh` it uses new prices without a restart.
+
+## 🍽 Running the CLI planner
+
 ```bash
-export BOT_TOKEN="your_telegram_bot_token"
-python3 bot.py
+# 2 people, 3 meals, 2500 AMD per day (Armenian output)
+python3 plan.py --people 2 --meals նախաճաշ,ճաշ,ընթրիք --budget 2500
+
+# English meal names and interface
+python3 plan.py --people 2 --meals breakfast,lunch,dinner --budget 2500 --lang en
+
+# show option 2 with cooking steps and its real shopping list; the shop bill must fit the budget
+python3 plan.py --people 2 --budget 2500 --pick 2 --steps --real
+
+# 3-day plan, bought together
+python3 plan.py --people 4 --meals ճաշ,ընթրիք --budget 4000 --days 3 --steps
+
+# every dinner that fits 900 AMD
+python3 plan.py --people 2 --meals ընթրիք --budget 900 --all
 ```
+
+| Flag | Meaning |
+|---|---|
+| `--people N` | number of people (required) |
+| `--meals` | `նախաճաշ,ճաշ,ընթրիք` (also Russian or English names), default all three |
+| `--budget N` | per day, whole group, in AMD (required) |
+| `--days N` | plan several days without repeating dishes |
+| `--top N` | number of options shown (default 3) |
+| `--pick N` | option whose steps and shopping list are printed |
+| `--real` | the real shop bill (whole packs) must fit the budget (single day) |
+| `--pantry a,b` | ingredient ids already at home (default salt, black_pepper, sunflower_oil; `none`) |
+| `--prices p25\|median` | which ingredient price to use |
+| `--steps` | print cooking instructions |
+| `--all` | list every recipe that fits each meal's share |
+| `--sides` | allow side dishes as a main |
+| `--lang hy\|en` | interface language (default hy) |
+
+"Eaten" cost is the normal price of the food used; "shop" is what you pay for whole packs. The difference is leftover you can use later.
 
 ---
 
-## 🛠 Extending the Project
+## 🛠 Extending the project
 
-- **Adding Recipes:** Edit `recipes_data.py` using existing ingredient IDs from `ingredients.py`, then run `python3 recipes.py`.
-- **Tuning Ingredient Matching:** Run `python3 match.py --unmapped` to inspect frequent unmatched words or `--samples` to audit matched products, update regex rules in `ingredients.py`, and re-run `python3 match.py`.
-- **Adding More Supermarkets:** `db.py` already supports multiple stores (`yerevan_city`, `sas`); adding a new scraper will automatically let `shop.py` compare and pick the cheapest packs across stores.
+- **Recipes:** add to `recipes_data.py` (English) and `recipes_hy.py` (Armenian, same number of steps), using ingredient ids from `ingredients.py`; then `./update.sh --skip-scrape`. A step-count mismatch prints a WARNING and that recipe falls back to English steps.
+- **Matching quality:** `python3 match.py --unmapped` writes `unmapped_report.txt`; `python3 match.py --samples` writes `match_samples.txt` to eyeball matches. Edit rules in `ingredients.py` and re-run `python3 match.py && python3 recipes.py`.
+- **New ingredient:** add it to `ingredients.py` and its Armenian name to `names_hy.py`.
+- **Another supermarket:** `db.py` already supports several stores; add a scraper and `shop.py` can compare packs.
+
+## ⚠️ Known limits
+
+- No live price check, no stock information, one store (Yerevan City).
+- The planner leans cheap and has no nutrition data yet.
+- Loose items are rounded up to 100 g; fresh vegetables have few price points, so their cost can drift.
+- Herbs and spices are not in recipes (sold per bunch / pack without a per-kg price).
+
+## 🧯 Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `no such column: steps_hy` | run `./update.sh --skip-scrape` (rebuilds the tables) |
+| `No priced recipes in the database` | run `./update.sh --skip-scrape` |
+| `BOT_TOKEN is not set` | export it or create `.env` (see above) |
+| `ModuleNotFoundError: telegram` | `pip install "python-telegram-bot>=20.0"` |
+| Scraper stopped halfway | `python3 scraper.py --resume raw/yerevan_city/<folder>`, then `./update.sh --skip-scrape` |

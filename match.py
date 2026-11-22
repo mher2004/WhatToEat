@@ -12,16 +12,15 @@ import statistics
 import sys
 from collections import Counter, defaultdict
 
+from names_hy import ING_HY
 from ingredients import ANY_EXCLUDE, GLOBAL_EXCLUDE, RAW_EXCLUDE, all_ingredients
 
 BRAND = re.compile(r"«[^»]*»|\([^)]*\)")
 GLOBAL_EXC = [re.compile(p) for p in GLOBAL_EXCLUDE + ANY_EXCLUDE]
 
 SCHEMA = """
-DROP TABLE IF EXISTS ingredients;
-CREATE TABLE ingredients (
-  id TEXT PRIMARY KEY, name_en TEXT NOT NULL, name_hy TEXT NOT NULL,
-  price_basis TEXT NOT NULL, grams_per_piece REAL
+CREATE TABLE IF NOT EXISTS ingredients (
+  id TEXT PRIMARY KEY, name_en TEXT NOT NULL, name_hy TEXT, price_basis TEXT NOT NULL, grams_per_piece REAL
 );
 CREATE TABLE IF NOT EXISTS product_ingredients (
   product_id INTEGER PRIMARY KEY REFERENCES products_raw(id),
@@ -63,10 +62,11 @@ def match(name, category, ingredients):
 def main():
     ings = all_ingredients()
     con = sqlite3.connect("whattoeat.db")
+    con.execute("DROP TABLE IF EXISTS ingredients")
     con.executescript(SCHEMA)
     con.execute("DELETE FROM ingredients")
     con.executemany("INSERT INTO ingredients VALUES (?,?,?,?,?)",
-                    [(i["id"], i["en"], i["hy"], i["basis"], i["gpp"]) for i in ings])
+                    [(i["id"], i["en"], ING_HY.get(i["id"], i["en"]), i["basis"], i["gpp"]) for i in ings])
 
     rows = con.execute("SELECT id, name, category_id FROM products_raw").fetchall()
     con.execute("DELETE FROM product_ingredients")

@@ -13,18 +13,11 @@ from cost import ingredient_amount
 BAD_SIZE = ("conflict", "unknown", "api_differs", "api_ml_differs", "api_no_unverified")
 PANTRY_DEFAULT = ("salt", "black_pepper", "sunflower_oil")
 
-# In shop.py:
-def load_info(con):
-    return {i: (hy or en, b, g) for i, en, hy, b, g in
-            con.execute("SELECT id, name_en, name_hy, price_basis, grams_per_piece FROM ingredients")}
 
-
-def fmt_amount(x, basis):
-    if basis == "kg":
-        return f"{x * 1000:.0f} գ"
-    if basis == "l":
-        return f"{x * 1000:.0f} մլ"
-    return f"{x:g} հատ"
+def load_info(con, lang="hy"):
+    col = "COALESCE(NULLIF(name_hy, ''), name_en)" if lang == "hy" else "name_en"
+    return {i: (n, b, g) for i, n, b, g in
+            con.execute(f"SELECT id, {col}, price_basis, grams_per_piece FROM ingredients")}
 
 
 def build_catalog(con, info):
@@ -98,3 +91,12 @@ def shopping(catalog, info, recipes, pantry=PANTRY_DEFAULT):
                           n=b["n"], pack=o["pack"], cost=b["cost"], leftover=b["leftover"], loose=o["loose"]))
     return dict(lines=lines, pay=round(pay), consumed=round(consumed),
                 leftover_value=round(pay - consumed), pantry=pantry_used, unpriced=unpriced)
+
+
+def fmt_amount(x, basis, units=None):
+    u = units or {"g": "g", "ml": "ml", "pc": "pc"}
+    if basis == "kg":
+        return f"{x * 1000:.0f} {u['g']}"
+    if basis == "l":
+        return f"{x * 1000:.0f} {u['ml']}"
+    return f"{x:g} {u['pc']}"

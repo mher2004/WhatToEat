@@ -149,7 +149,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         meals = context.user_data.get("meals", ["breakfast", "lunch", "dinner"])
 
         con, info, catalog = get_data()
-        recipes = load_recipes(con, people, "p25")
+        recipes = load_recipes(con, people, "p25", "hy")
         options = day_plans(recipes, meals, budget, top=3)
         con.close()
 
